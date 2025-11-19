@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Terminal, GitBranch, Check, AlertTriangle, Code, ArrowRight, ArrowLeft, Database, Layers, Network, List } from 'lucide-react';
+import React, { useState } from 'react';
+import { Play, Terminal, ArrowRight, ArrowLeft, Database, Network } from 'lucide-react';
 import './index.css';
 
 // --- 1. SISTEMA DE TIPOS ---
