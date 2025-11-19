@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Play, Terminal, GitBranch, Check, AlertTriangle, Code } from 'lucide-react';
+import './index.css'; // Garante que os estilos sejam carregados
 
-// --- 1. TYPE SYSTEM DEFINITIONS ---
+// --- 1. DEFINIÇÕES DO SISTEMA DE TIPOS ---
 
 class Type {
     constructor(id) { this.id = id; }
@@ -21,7 +22,7 @@ class TypeArrow extends Type {
     }
 }
 
-// --- 2. AST DEFINITIONS ---
+// --- 2. DEFINIÇÕES DA AST ---
 
 class Expr {}
 class EInt extends Expr { constructor(val) { super(); this.val = val; } }
@@ -33,10 +34,9 @@ class EFun extends Expr { constructor(param, body) { super(); this.param = param
 class ELet extends Expr { constructor(name, val, body) { super(); this.name = name; this.val = val; this.body = body; } }
 class EApp extends Expr { constructor(func, arg) { super(); this.func = func; this.arg = arg; } }
 
-// --- 3. PARSER (Text -> AST) ---
+// --- 3. PARSER (Texto -> AST) ---
 
 const tokenize = (input) => {
-    // Simple regex for tokens: numbers, booleans, keywords, arrows, operators, ids, parens
     const regex = /\s+|(\d+)|(true|false)|(let|in|if|then|else|fun)|(->)|(==|!=|<=|>=|<|>|\+|-|\*|\/|=)|([a-zA-Z_][a-zA-Z0-9_]*)|(\(|\))/g;
     const tokens = [];
     let match;
@@ -66,12 +66,12 @@ class Parser {
         return false;
     }
     expect(type, val) {
-        if (!this.match(type, val)) throw new Error(`Syntax Error: Expected ${val || type}, found ${this.peek()?.val}`);
+        if (!this.match(type, val)) throw new Error(`Erro de Sintaxe: Esperado ${val || type}, encontrado ${this.peek()?.val}`);
     }
 
     parseAtom() {
         const t = this.peek();
-        if (!t) throw new Error("Unexpected End of File");
+        if (!t) throw new Error("Fim de arquivo inesperado");
         if (t.type === 'NUM') { this.consume(); return new EInt(t.val); }
         if (t.type === 'BOOL') { this.consume(); return new EBool(t.val); }
         if (t.type === 'ID') { this.consume(); return new EVar(t.val); }
@@ -80,7 +80,7 @@ class Parser {
             this.expect('PUNC', ')');
             return expr;
         }
-        throw new Error(`Unexpected Token: ${t.val}`);
+        throw new Error(`Token inesperado: ${t.val}`);
     }
 
     parseApp() {
@@ -111,7 +111,7 @@ class Parser {
     parseExpression() {
         if (this.match('KW', 'let')) {
             const tId = this.consume();
-            if (tId.type !== 'ID') throw new Error("Expected identifier after 'let'");
+            if (tId.type !== 'ID') throw new Error("Esperado identificador após 'let'");
             this.expect('OP', '=');
             const val = this.parseExpression();
             this.expect('KW', 'in');
@@ -120,7 +120,7 @@ class Parser {
         }
         if (this.match('KW', 'fun')) {
             const tParam = this.consume();
-            if (tParam.type !== 'ID') throw new Error("Expected parameter after 'fun'");
+            if (tParam.type !== 'ID') throw new Error("Esperado parâmetro após 'fun'");
             this.expect('ARROW');
             const body = this.parseExpression();
             return new EFun(tParam.val, body);
@@ -137,7 +137,7 @@ class Parser {
     }
 }
 
-// --- 4. INFERENCE ENGINE ---
+// --- 4. MOTOR DE INFERÊNCIA ---
 
 let typeVarCounter = 0;
 const resetTypeVars = () => { typeVarCounter = 0; };
@@ -149,20 +149,24 @@ const occursIn = (tvar, type) => {
     if (type instanceof TypeArrow) return occursIn(tvar, type.param) || occursIn(tvar, type.ret);
     return false;
 };
-const unify = (t1, t2, logger) => {
+const unify = (t1, t2, logger, contextMsg) => {
     t1 = prune(t1); t2 = prune(t2);
     if (t1 === t2) return;
     if (t1 instanceof TypeInt && t2 instanceof TypeInt) return;
     if (t1 instanceof TypeBool && t2 instanceof TypeBool) return;
     if (t1 instanceof TypeVar) {
-        if (occursIn(t1, t2)) throw new Error(`Infinite Type Error: ${t1} occurs in ${t2}`);
-        t1.instance = t2; logger(`Unify: ${t1.name} ~ ${t2}`, 'success'); return;
+        if (occursIn(t1, t2)) throw new Error(`Erro de Tipo Infinito: ${t1} ocorre dentro de ${t2}`);
+        t1.instance = t2;
+        logger(`UNIFICAR: ${t1.name} agora é ${t2} (${contextMsg || 'Resolução de restrição'})`, 'success');
+        return;
     }
-    if (t2 instanceof TypeVar) { unify(t2, t1, logger); return; }
+    if (t2 instanceof TypeVar) { unify(t2, t1, logger, contextMsg); return; }
     if (t1 instanceof TypeArrow && t2 instanceof TypeArrow) {
-        unify(t1.param, t2.param, logger); unify(t1.ret, t2.ret, logger); return;
+        unify(t1.param, t2.param, logger, 'Parâmetros de função devem coincidir');
+        unify(t1.ret, t2.ret, logger, 'Retorno de função deve coincidir');
+        return;
     }
-    throw new Error(`Type Mismatch: Expected ${t1}, Found ${t2}`);
+    throw new Error(`Tipo Incompatível: Esperado ${t1}, Encontrado ${t2}`);
 };
 
 const analyze = (env, expr, logger) => {
@@ -170,31 +174,35 @@ const analyze = (env, expr, logger) => {
     if (expr instanceof EBool) { return new TypeBool(); }
     if (expr instanceof EVar) {
         const t = env[expr.name];
-        if (!t) throw new Error(`Undefined Variable: '${expr.name}'`);
+        if (!t) throw new Error(`Variável Indefinida: '${expr.name}'`);
         return t;
     }
     if (expr instanceof EBinOp) {
-        logger(`Analyzing Binary Op '${expr.op}'`, 'info');
+        logger(`RESTRIÇÃO: Operador '${expr.op}' exige operandos compatíveis.`, 'info');
         const tLeft = analyze(env, expr.left, logger);
         const tRight = analyze(env, expr.right, logger);
         if (['+', '-', '*', '/'].includes(expr.op)) {
-            unify(tLeft, new TypeInt(), logger); unify(tRight, new TypeInt(), logger); return new TypeInt();
+            unify(tLeft, new TypeInt(), logger, `Lado esquerdo de '${expr.op}' deve ser Int`);
+            unify(tRight, new TypeInt(), logger, `Lado direito de '${expr.op}' deve ser Int`);
+            return new TypeInt();
         } else if (['==', '!=', '<', '>'].includes(expr.op)) {
-            unify(tLeft, tRight, logger); return new TypeBool();
+            unify(tLeft, tRight, logger, `Operandos de '${expr.op}' devem ser iguais`);
+            return new TypeBool();
         }
     }
     if (expr instanceof EIf) {
+        logger(`RESTRIÇÃO: Condição do 'if' deve ser Bool, ramos devem ser iguais.`, 'info');
         const tCond = analyze(env, expr.cond, logger);
-        unify(tCond, new TypeBool(), logger);
+        unify(tCond, new TypeBool(), logger, "Condição do 'if'");
         const tThen = analyze(env, expr.thenBr, logger);
         const tElse = analyze(env, expr.elseBr, logger);
-        unify(tThen, tElse, logger);
+        unify(tThen, tElse, logger, "Ramo 'else' deve igualar ramo 'then'");
         return tThen;
     }
     if (expr instanceof EFun) {
         const paramType = newTypeVar();
         const newEnv = { ...env, [expr.param]: paramType };
-        logger(`Function: param '${expr.param}' is ${paramType.name}`, 'info');
+        logger(`NOVO ESCOPO: Parâmetro '${expr.param}' assumiu tipo novo ${paramType.name}`, 'info');
         const bodyType = analyze(newEnv, expr.body, logger);
         return new TypeArrow(paramType, bodyType);
     }
@@ -202,60 +210,62 @@ const analyze = (env, expr, logger) => {
         const tFunc = analyze(env, expr.func, logger);
         const tArg = analyze(env, expr.arg, logger);
         const tRet = newTypeVar();
-        unify(tFunc, new TypeArrow(tArg, tRet), logger);
+        logger(`RESTRIÇÃO: Aplicando função ${tFunc} ao argumento ${tArg}`, 'info');
+        unify(tFunc, new TypeArrow(tArg, tRet), logger, "Aplicação de função");
         return tRet;
     }
     if (expr instanceof ELet) {
-        logger(`Let Binding '${expr.name}'`, 'info');
+        logger(`LET: Inferindo tipo para '${expr.name}'...`, 'info');
         const valType = analyze(env, expr.val, logger);
         const newEnv = { ...env, [expr.name]: valType };
+        logger(`AMBIENTE: '${expr.name}' definido como ${valType}`, 'info');
         return analyze(newEnv, expr.body, logger);
     }
-    throw new Error("Unknown Expression");
+    throw new Error("Expressão Desconhecida");
 };
 
-// --- 5. SCENARIOS (English) ---
+// --- 5. CENÁRIOS (Em Português) ---
 
 const SCENARIOS = [
     {
         id: 'basic',
-        title: "1. Simple Integer",
+        title: "1. Inteiro Simples",
         code: "10 + 5",
-        description: "Basic arithmetic operations force operands to be Integer."
+        description: "Operações aritméticas básicas forçam os operandos a serem Inteiros."
     },
     {
         id: 'func',
-        title: "2. Simple Function",
+        title: "2. Função Simples",
         code: "fun x -> x + 1",
-        description: "Compiler infers 'x' must be Int because of usage with '+'."
+        description: "O compilador infere que 'x' deve ser Int devido ao uso com '+'."
     },
     {
         id: 'poly',
-        title: "3. Polymorphism",
+        title: "3. Polimorfismo",
         code: "fun x -> x",
-        description: "Identity function. 'x' is T0 and returns T0. No constraints found."
+        description: "Função Identidade. 'x' entra como T0 e sai como T0. Nenhuma restrição encontrada."
     },
     {
         id: 'if',
-        title: "4. Conditional",
+        title: "4. Condicional",
         code: "fun x -> if x then 1 else 0",
-        description: "The 'if' condition forces 'x' to Bool, branches force return to Int."
+        description: "A condição 'if' força 'x' a ser Bool, os ramos forçam o retorno a ser Int."
     },
     {
         id: 'error',
-        title: "5. Type Error",
+        title: "5. Erro de Tipo",
         code: "true + 1",
-        description: "Trying to add Bool and Int. Unification should fail."
+        description: "Tentativa de somar Bool e Int. A unificação deve falhar."
     },
     {
         id: 'hof',
-        title: "6. Higher Order",
+        title: "6. Ordem Superior",
         code: "let apply = (fun f -> f 10) in apply (fun x -> x + 1)",
-        description: "Passing a function as an argument. Complex inference chain."
+        description: "Passando uma função como argumento. Cadeia de inferência complexa."
     }
 ];
 
-// --- 6. REACT COMPONENT ---
+// --- 6. COMPONENTE REACT ---
 
 export default function App() {
     const [code, setCode] = useState(SCENARIOS[0].code);
@@ -284,25 +294,25 @@ export default function App() {
         };
 
         try {
-            logger("1. Tokenizing input...", 'info');
+            logger("1. Tokenizando entrada...", 'info');
             const tokens = tokenize(code);
 
-            logger("2. Generating AST (Parser)...", 'info');
+            logger("2. Gerando AST (Parser)...", 'info');
             const parser = new Parser(tokens);
             const ast = parser.parseExpression();
 
-            if (parser.peek()) logger("Warning: Unconsumed tokens remaining.", 'warn');
+            if (parser.peek()) logger("Aviso: Tokens sobrando após análise.", 'warn');
 
-            logger("3. Running Inference Algorithm...", 'info');
+            logger("3. Iniciando Algoritmo W (Inferência)...", 'info');
             const type = analyze({}, ast, logger);
 
             const finalType = prune(type).toString();
             setResult(finalType);
-            logger(`SUCCESS: Final Inferred Type: ${finalType}`, 'success');
+            logger(`SUCESSO: Tipo Inferido: ${finalType}`, 'success');
 
         } catch (e) {
             setError(e.message);
-            logger(`ERROR: ${e.message}`, 'error');
+            logger(`ERRO: ${e.message}`, 'error');
         }
 
         setLogs(localLogs);
@@ -310,7 +320,7 @@ export default function App() {
 
     const getLogColor = (type) => {
         switch(type) {
-            case 'success': return 'text-green-400';
+            case 'success': return 'text-green-400 font-semibold';
             case 'error': return 'text-red-400 font-bold';
             case 'warn': return 'text-yellow-400';
             default: return 'text-gray-400';
@@ -323,10 +333,10 @@ export default function App() {
                 <div>
                     <h1 className="text-xl md:text-2xl font-bold text-blue-400 flex items-center gap-2">
                         <Terminal className="w-6 h-6" />
-                        Type Inference Visualizer
+                        Visualizador de Inferência de Tipos
                     </h1>
                     <p className="text-slate-400 text-xs mt-1">
-                        Edit the code below and watch Algorithm W in action
+                        Demo Interativa do Algoritmo W (Hindley-Milner)
                     </p>
                 </div>
             </header>
@@ -339,7 +349,7 @@ export default function App() {
                     {/* Scenario Selector */}
                     <div className="bg-slate-800 p-3 rounded-lg border border-slate-700">
                         <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                            <GitBranch className="w-3 h-3" /> Load Example
+                            <GitBranch className="w-3 h-3" /> Carregar Exemplo
                         </h2>
                         <div className="flex flex-wrap gap-2">
                             {SCENARIOS.map((sc) => (
@@ -363,7 +373,7 @@ export default function App() {
                             value={code}
                             onChange={(e) => setCode(e.target.value)}
                             className="flex-1 w-full bg-slate-900/50 text-blue-100 p-4 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 rounded"
-                            placeholder="Write expression here... ex: fun x -> x + 1"
+                            placeholder="Escreva o código aqui... ex: fun x -> x + 1"
                             spellCheck="false"
                         />
                         <div className="p-3 bg-slate-800 text-xs text-slate-400 border-t border-slate-700/50">
@@ -377,14 +387,14 @@ export default function App() {
                             onClick={runInference}
                             className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg font-bold transition-colors shadow-lg active:scale-95 transform duration-100"
                         >
-                            <Play className="w-4 h-4" /> Compile & Infer
+                            <Play className="w-4 h-4" /> Compilar e Inferir
                         </button>
 
                         {error ? (
-                            <div className="flex items-center gap-3 text-red-200 bg-red-900/40 p-4 rounded border border-red-500/30 shadow-inner">
+                            <div className="flex items-center gap-3 text-red-200 bg-red-900/40 p-4 rounded border border-red-500/30 shadow-inner animate-pulse">
                                 <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
                                 <div>
-                                    <div className="text-xs font-bold uppercase text-red-400">Type Error</div>
+                                    <div className="text-xs font-bold uppercase text-red-400">Falha na Inferência</div>
                                     <div className="text-sm font-mono">{error}</div>
                                 </div>
                             </div>
@@ -392,13 +402,13 @@ export default function App() {
                             <div className="flex items-center gap-3 text-green-200 bg-green-900/40 p-4 rounded border border-green-500/30 shadow-inner">
                                 <Check className="w-6 h-6 text-green-400 flex-shrink-0" />
                                 <div>
-                                    <div className="text-xs font-bold uppercase text-green-400">Inferred Type</div>
+                                    <div className="text-xs font-bold uppercase text-green-400">Inferência com Sucesso</div>
                                     <div className="text-lg font-mono font-bold tracking-wide">{result}</div>
                                 </div>
                             </div>
                         ) : (
                             <div className="h-20 flex items-center justify-center text-slate-600 text-sm border border-dashed border-slate-700 rounded">
-                                Waiting for execution...
+                                Aguardando análise...
                             </div>
                         )}
                     </div>
@@ -408,39 +418,28 @@ export default function App() {
                 <div className="lg:col-span-7 bg-black rounded-lg border border-slate-700 p-4 font-mono text-sm overflow-hidden flex flex-col shadow-2xl relative">
                     <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
                         <h2 className="text-slate-400 text-xs uppercase tracking-widest flex items-center gap-2">
-                            <Terminal className="w-3 h-3" /> Inference Log
+                            <Terminal className="w-3 h-3" /> Log do Compilador (Stdout)
                         </h2>
-                        <span className="text-[10px] text-slate-600 border border-slate-700 px-2 py-0.5 rounded">Verbose: ON</span>
+                        <span className="text-[10px] text-slate-600 border border-slate-700 px-2 py-0.5 rounded">Detalhado: ON</span>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 custom-scrollbar font-mono text-xs md:text-sm">
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar font-mono text-xs md:text-sm">
                         {logs.length === 0 && (
-                            <div className="text-slate-700 mt-10 text-center italic">
-                                Unification log will appear here...
+                            <div className="flex flex-col items-center justify-center h-full text-slate-700 opacity-50">
+                                <Terminal className="w-12 h-12 mb-2" />
+                                <span className="text-center">Aguardando entrada...<br/>Clique em 'Compilar e Inferir' para iniciar.</span>
                             </div>
                         )}
                         {logs.map((log) => (
-                            <div key={log.id} className={`flex gap-2 ${getLogColor(log.type)} animate-fadeIn border-l-2 border-transparent hover:border-slate-700 pl-1`}>
-                                <span className="opacity-30 select-none flex-shrink-0">{'>'}</span>
-                                <span className="break-all">{log.msg}</span>
+                            <div key={log.id} className={`flex gap-2 ${getLogColor(log.type)} animate-fadeIn border-l-2 border-transparent hover:border-slate-700 pl-2 py-0.5`}>
+                                <span className="opacity-30 select-none flex-shrink-0 mt-0.5">{'>'}</span>
+                                <span className="break-words leading-relaxed">{log.msg}</span>
                             </div>
                         ))}
                     </div>
                 </div>
 
             </div>
-
-            <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateX(-5px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-        .animate-fadeIn { animation: fadeIn 0.2s ease-out forwards; }
-      `}</style>
         </div>
     );
 }
